@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fritz Monitor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #ffffff;
+      --surface:  #f5f5f5;
+      --border:   #e0e0e0;
+      --border-strong: #c0c0c0;
+      --text:     #111111;
+      --muted:    #888888;
+      --faint:    #cccccc;
+      --accent:   #111111;
+      --mono:     'JetBrains Mono', 'SF Mono', 'Fira Mono', monospace;
+    }
+
+    body {
+      font-family: var(--mono);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 32px 24px;
+      max-width: 860px;
+      margin: 0 auto;
+    }
+
+    /* ── Header ── */
+    header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      margin-bottom: 28px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 12px;
+    }
+
+    header h1 {
+      font-size: 0.9rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .pulse {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: #111;
+      display: inline-block;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.2} }
+
+    .refresh-info {
+      font-size: 0.7rem;
+      color: var(--muted);
+      letter-spacing: 0.02em;
+    }
+
+    /* ── WAN stats ── */
+    .wan-bar {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1px;
+      background: var(--border);
+      border: 1px solid var(--border);
+      margin-bottom: 1px;
+    }
+
+    .wan-stat {
+      background: var(--bg);
+      padding: 18px 20px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .wan-stat-top { display: flex; align-items: baseline; gap: 10px; }
+
+    .wan-label {
+      font-size: 0.65rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+
+    .wan-value {
+      font-size: 2rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
+    }
+
+    .wan-fill-bg {
+      width: 100%;
+      height: 2px;
+      background: var(--faint);
+    }
+
+    .wan-fill-bar {
+      height: 100%;
+      background: var(--text);
+      transition: width .6s ease;
+    }
+
+    .wan-max {
+      font-size: 0.65rem;
+      color: var(--faint);
+      letter-spacing: 0.04em;
+    }
+
+    /* ── Sparkline ── */
+    .wan-chart {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-top: none;
+      padding: 12px 16px 10px;
+      margin-bottom: 24px;
+    }
+
+    .wan-chart-title {
+      font-size: 0.62rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 8px;
+    }
+
+    canvas#sparkline {
+      width: 100%;
+      height: 52px;
+      display: block;
+    }
+
+    /* ── Error ── */
+    #error-box {
+      border: 1px solid var(--border-strong);
+      color: var(--text);
+      background: var(--surface);
+      padding: 10px 14px;
+      margin-bottom: 16px;
+      font-size: 0.75rem;
+      display: none;
+    }
+
+    /* ── Filters ── */
+    .filters {
+      display: flex;
+      gap: 0;
+      margin-bottom: 0;
+      align-items: center;
+      border: 1px solid var(--border);
+      border-bottom: none;
+    }
+
+    .filter-btn {
+      background: var(--surface);
+      border: none;
+      border-right: 1px solid var(--border);
+      color: var(--muted);
+      padding: 7px 16px;
+      font-size: 0.68rem;
+      font-family: var(--mono);
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      cursor: pointer;
+      transition: background .1s, color .1s;
+    }
+
+    .filter-btn:last-of-type { border-right: none; }
+    .filter-btn:hover { background: var(--border); color: var(--text); }
+    .filter-btn.active { background: var(--text); color: var(--bg); }
+
+    .device-count {
+      font-size: 0.65rem;
+      color: var(--muted);
+      margin-left: auto;
+      padding: 0 14px;
+      letter-spacing: 0.03em;
+    }
+
+    /* ── Table ── */
+    .col-head {
+      display: grid;
+      grid-template-columns: 1fr 80px 120px;
+      padding: 7px 14px;
+      font-size: 0.62rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      border: 1px solid var(--border);
+      border-bottom: none;
+      background: var(--surface);
+    }
+
+    .table-wrapper {
+      display: flex;
+      flex-direction: column;
+      border: 1px solid var(--border);
+    }
+
+    .device-row {
+      display: grid;
+      grid-template-columns: 1fr 80px 120px;
+      gap: 0;
+      padding: 10px 14px;
+      align-items: center;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+      transition: background .1s;
+    }
+
+    .device-row:last-child { border-bottom: none; }
+    .device-row:hover { background: var(--surface); }
+    .device-row.inactive { opacity: .38; }
+    .device-row.priority { border-left: 2px solid var(--text); padding-left: 12px; }
+
+    .device-name {
+      font-weight: 500;
+      font-size: 0.82rem;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .device-ip {
+      font-size: 0.7rem;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    /* Badges */
+    .badge {
+      display: inline-block;
+      padding: 1px 6px;
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      border: 1px solid;
+    }
+
+    .badge-wifi    { border-color: var(--border-strong); color: var(--text); }
+    .badge-lan     { border-color: var(--border-strong); color: var(--text); }
+    .badge-unknown { border-color: var(--faint);         color: var(--muted); }
+    .badge-off     { border-color: var(--faint);         color: var(--faint); }
+    .badge-prio    {
+      border-color: var(--text);
+      color: var(--text);
+      font-size: 0.58rem;
+      letter-spacing: 0.08em;
+    }
+
+    /* Signal */
+    .signal-wrap {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .signal-bars {
+      display: flex;
+      align-items: flex-end;
+      gap: 2px;
+      height: 14px;
+    }
+
+    .signal-bar {
+      width: 3px;
+      background: var(--faint);
+    }
+
+    .signal-bar.active { background: var(--text); }
+    .signal-bar:nth-child(1) { height: 4px; }
+    .signal-bar:nth-child(2) { height: 7px; }
+    .signal-bar:nth-child(3) { height: 10px; }
+    .signal-bar:nth-child(4) { height: 14px; }
+
+    .signal-val {
+      font-size: 0.72rem;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .wifi-speed {
+      font-size: 0.65rem;
+      color: var(--faint);
+      margin-top: 2px;
+    }
+
+    .status-online  { font-size: 0.72rem; color: var(--text); }
+    .status-offline { font-size: 0.72rem; color: var(--faint); }
+
+    /* ── Rename ── */
+    .device-name-text {
+      cursor: text;
+      border-bottom: 1px dashed transparent;
+      transition: border-color .1s;
+    }
+    .device-name-text:hover { border-bottom-color: var(--muted); }
+
+    .rename-input {
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      font-weight: 500;
+      color: var(--text);
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      padding: 1px 6px;
+      outline: none;
+      width: 180px;
+    }
+    .rename-input:focus { border-color: var(--text); }
+
+    /* ── Priority toggle ── */
+    .prio-btn {
+      background: none;
+      border: 1px solid var(--faint);
+      color: var(--faint);
+      font-family: var(--mono);
+      font-size: 0.62rem;
+      padding: 1px 5px;
+      cursor: pointer;
+      letter-spacing: 0.04em;
+      line-height: 1.5;
+      transition: border-color .1s, color .1s, background .1s;
+    }
+    .prio-btn:hover { border-color: var(--muted); color: var(--text); }
+    .prio-btn.on {
+      border-color: var(--text);
+      color: var(--text);
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1><span class="pulse"></span>Fritz Monitor</h1>
+    <span class="refresh-info" id="last-update">—</span>
+  </header>
+
+  <div class="wan-bar">
+    <div class="wan-stat">
+      <div class="wan-stat-top">
+        <div>
+          <div class="wan-label">↓ Download DSL</div>
+          <div class="wan-value" id="wan-down">—</div>
+        </div>
+      </div>
+      <div class="wan-fill-bg"><div class="wan-fill-bar" id="wan-down-bar" style="width:0%"></div></div>
+      <div class="wan-max">max <span id="wan-max-down">—</span></div>
+    </div>
+    <div class="wan-stat">
+      <div class="wan-stat-top">
+        <div>
+          <div class="wan-label">↑ Upload DSL</div>
+          <div class="wan-value" id="wan-up">—</div>
+        </div>
+      </div>
+      <div class="wan-fill-bg"><div class="wan-fill-bar" id="wan-up-bar" style="width:0%"></div></div>
+      <div class="wan-max">max <span id="wan-max-up">—</span></div>
+    </div>
+  </div>
+
+  <div class="wan-chart">
+    <div class="wan-chart-title">3 min — ↓ download · ↑ upload</div>
+    <canvas id="sparkline"></canvas>
+  </div>
+
+  <div id="error-box"></div>
+
+  <div class="filters">
+    <button class="filter-btn active" onclick="setFilter('all', this)">Tous</button>
+    <button class="filter-btn" onclick="setFilter('active', this)">Connectés</button>
+    <button class="filter-btn" onclick="setFilter('wifi', this)">WiFi</button>
+    <button class="filter-btn" onclick="setFilter('lan', this)">LAN</button>
+    <button class="filter-btn" onclick="setFilter('priority', this)">★ Priorité</button>
+    <span class="device-count" id="device-count"></span>
+  </div>
+
+  <div class="col-head">
+    <div>Appareil</div>
+    <div>Connexion</div>
+    <div>Signal / Statut</div>
+  </div>
+
+  <div class="table-wrapper" id="device-list">
+    <div style="color:#aaa;padding:24px;text-align:center;font-size:.75rem">Chargement…</div>
+  </div>
+
+  <script>
+    let currentFilter = 'all';
+    let allDevices = [];
+    let wanHistory = [];
+
+    function setFilter(f, btn) {
+      currentFilter = f;
+      document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      renderDevices();
+    }
+
+    function getInterface(iface, active) {
+      if (!active) return '<span class="badge badge-off">offline</span>';
+      if (iface === 'WiFi') return '<span class="badge badge-wifi">WiFi</span>';
+      if (iface === 'LAN')  return '<span class="badge badge-lan">LAN</span>';
+      return '<span class="badge badge-unknown">?</span>';
+    }
+
+    function signalBars(signal) {
+      const bars = signal > 75 ? 4 : signal > 50 ? 3 : signal > 25 ? 2 : signal > 0 ? 1 : 0;
+      let html = '<div class="signal-bars">';
+      for (let i = 1; i <= 4; i++) html += `<div class="signal-bar${i <= bars ? ' active' : ''}"></div>`;
+      return html + '</div>';
+    }
+
+    function renderDevices() {
+      let list = allDevices;
+      if (currentFilter === 'active')   list = list.filter(d => d.active);
+      if (currentFilter === 'wifi')     list = list.filter(d => d.interface === 'WiFi' && d.active);
+      if (currentFilter === 'lan')      list = list.filter(d => d.interface === 'LAN'  && d.active);
+      if (currentFilter === 'priority') list = list.filter(d => d.priority);
+
+      document.getElementById('device-count').textContent =
+        `${list.filter(d => d.active).length} / ${list.length}`;
+
+      const container = document.getElementById('device-list');
+      if (!list.length) {
+        container.innerHTML = '<div style="color:#aaa;padding:24px;text-align:center;font-size:.75rem">Aucun appareil</div>';
+        return;
+      }
+
+      container.innerHTML = list.map(d => {
+        const ifaceBadge = getInterface(d.interface, d.active);
+        const prioBadge  = d.priority ? ' <span class="badge badge-prio">★ prio</span>' : '';
+
+        let signalCol = '';
+        if (d.active && d.interface === 'WiFi') {
+          signalCol = `<div class="signal-wrap">${signalBars(d.signal)}<span class="signal-val">${d.signal}%</span></div>
+          ${d.wifi_mbps ? `<div class="wifi-speed">${d.wifi_mbps} Mbps</div>` : ''}`;
+        } else if (d.active) {
+          signalCol = `<span class="status-online">● en ligne</span>`;
+        } else {
+          signalCol = `<span class="status-offline">○ hors ligne</span>`;
+        }
+
+        const safeName = d.name.replace(/"/g, '&quot;').replace(/</g, '&lt;');
+        const safeMac  = d.mac.replace(/"/g, '&quot;');
+        const safeIp   = (d.ip || '').replace(/"/g, '&quot;');
+        const prioBtn  = d.ip
+          ? `<button class="prio-btn${d.priority ? ' on' : ''}"
+               onclick="togglePriority(this, '${safeIp}', ${d.priority})"
+               title="${d.priority ? 'Retirer la priorité' : 'Activer la priorité'}">★</button>`
+          : '';
+        return `<div class="device-row ${d.active ? '' : 'inactive'} ${d.priority ? 'priority' : ''}">
+          <div>
+            <div class="device-name">
+              <span class="device-name-text"
+                    onclick="startRename(this, '${safeMac}', '${safeName}')"
+                    title="Cliquer pour renommer">${safeName}</span>${prioBadge}
+            </div>
+            <div class="device-ip">${d.ip || d.mac} ${prioBtn}</div>
+          </div>
+          <div>${ifaceBadge}</div>
+          <div>${signalCol}</div>
+        </div>`;
+      }).join('');
+    }
+
+    function drawSparkline() {
+      const canvas = document.getElementById('sparkline');
+      const dpr = window.devicePixelRatio || 1;
+      const W = canvas.clientWidth;
+      const H = canvas.clientHeight;
+      canvas.width  = W * dpr;
+      canvas.height = H * dpr;
+      const ctx = canvas.getContext('2d');
+      ctx.scale(dpr, dpr);
+      ctx.clearRect(0, 0, W, H);
+
+      if (wanHistory.length < 2) return;
+
+      const maxVal = Math.max(1, ...wanHistory.map(p => Math.max(p.down, p.up)));
+      const pad = 1;
+      const w = W - pad * 2;
+      const h = H - pad * 2;
+
+      function drawLine(vals, stroke, fillAlpha) {
+        const pts = vals.map((v, i) => ({
+          x: pad + (i / (vals.length - 1)) * w,
+          y: pad + h - (v / maxVal) * h,
+        }));
+
+        // Fill
+        ctx.beginPath();
+        pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+        ctx.lineTo(pts[pts.length - 1].x, pad + h);
+        ctx.lineTo(pts[0].x, pad + h);
+        ctx.closePath();
+        ctx.fillStyle = `rgba(17,17,17,${fillAlpha})`;
+        ctx.fill();
+
+        // Line
+        ctx.beginPath();
+        pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = 1.5;
+        ctx.lineJoin = 'round';
+        ctx.stroke();
+      }
+
+      drawLine(wanHistory.map(p => p.down), '#111', 0.08);
+      drawLine(wanHistory.map(p => p.up),   '#888', 0.04);
+    }
+
+    async function refresh() {
+      try {
+        const res  = await fetch('/api/devices');
+        const data = await res.json();
+
+        const errBox = document.getElementById('error-box');
+        if (data.error) {
+          errBox.style.display = 'block';
+          errBox.textContent = 'Erreur : ' + data.error;
+        } else {
+          errBox.style.display = 'none';
+        }
+
+        if (data.wan?.down_fmt) {
+          document.getElementById('wan-down').textContent     = data.wan.down_fmt;
+          document.getElementById('wan-up').textContent       = data.wan.up_fmt;
+          document.getElementById('wan-max-down').textContent = data.wan.max_down_fmt || '—';
+          document.getElementById('wan-max-up').textContent   = data.wan.max_up_fmt   || '—';
+          const pctD = data.wan.max_down > 0 ? Math.min(100, data.wan.down / data.wan.max_down * 100) : 0;
+          const pctU = data.wan.max_up   > 0 ? Math.min(100, data.wan.up   / data.wan.max_up   * 100) : 0;
+          document.getElementById('wan-down-bar').style.width = pctD.toFixed(1) + '%';
+          document.getElementById('wan-up-bar').style.width   = pctU.toFixed(1) + '%';
+        }
+
+        allDevices = data.devices  || [];
+        wanHistory = data.wan_history || [];
+        renderDevices();
+        drawSparkline();
+
+        document.getElementById('last-update').textContent =
+          new Date().toLocaleTimeString('fr-FR');
+
+      } catch {
+        document.getElementById('error-box').style.display = 'block';
+        document.getElementById('error-box').textContent = 'Impossible de contacter le serveur.';
+      }
+    }
+
+    async function togglePriority(btn, ip, currentPrio) {
+      const newPrio = !currentPrio;
+      btn.disabled = true;
+      try {
+        const res  = await fetch('/api/priority', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ip, enabled: newPrio}),
+        });
+        const json = await res.json();
+        if (json.ok) {
+          btn.classList.toggle('on', newPrio);
+          btn.title = newPrio ? 'Retirer la priorité' : 'Activer la priorité';
+          btn.onclick = () => togglePriority(btn, ip, newPrio);
+          // Mettre à jour la bordure de la ligne
+          const row = btn.closest('.device-row');
+          row.classList.toggle('priority', newPrio);
+        }
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function startRename(el, mac, currentName) {
+      if (el.querySelector('input')) return; // déjà en édition
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'rename-input';
+      input.value = currentName;
+      el.textContent = '';
+      el.appendChild(input);
+      input.focus();
+      input.select();
+
+      async function commit() {
+        const newName = input.value.trim();
+        el.textContent = newName || currentName;
+        if (!newName || newName === currentName) return;
+        try {
+          const res = await fetch('/api/rename', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({mac, name: newName}),
+          });
+          const json = await res.json();
+          if (!json.ok) el.textContent = currentName;
+        } catch {
+          el.textContent = currentName;
+        }
+      }
+
+      input.addEventListener('keydown', e => {
+        if (e.key === 'Enter')  { input.blur(); }
+        if (e.key === 'Escape') { input.value = currentName; input.blur(); }
+      });
+      input.addEventListener('blur', commit);
+    }
+
+    window.addEventListener('resize', drawSparkline);
+    refresh();
+    setInterval(refresh, 3000);
+  </script>
+</body>
+</html>

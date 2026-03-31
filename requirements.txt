@@ -1,0 +1,3 @@
+flask
+fritzconnection
+requests
