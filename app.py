@@ -15,26 +15,57 @@ REFRESH_INTERVAL = 3
 _cache = {'devices': [], 'wan': {}, 'wan_history': [], 'error': None}
 _lock = threading.Lock()
 
+# État pour le delta-calcul des débits
+_prev_rx = 0
+_prev_tx = 0
+_prev_t  = 0.0
+
+# Cache des capacités DSL (ne changent pas sauf re-sync)
+_dsl_max = {'down': 0, 'up': 0, 'fetched_at': 0.0}
+DSL_CACHE_TTL = 300  # re-lire toutes les 5 min
+
 
 def get_wan_stats(fc):
     """
-    Débits réels actuels via TR-064 GetAddonInfos (bytes/s).
-    Capacité DSL max via GetCommonLinkProperties (bits/s → bytes/s).
+    Débits réels calculés par delta sur les compteurs cumulatifs 64-bit (GetAddonInfos).
+    Fallback sur NewByteReceiveRate/NewByteSendRate si premier appel ou compteur incohérent.
+    Capacité DSL max via GetCommonLinkProperties, cachée 5 min.
     """
-    addon = fc.call_action('WANCommonIFC1', 'GetAddonInfos')
-    down = int(addon.get('NewByteReceiveRate', 0))
-    up   = int(addon.get('NewByteSendRate', 0))
+    global _prev_rx, _prev_tx, _prev_t, _dsl_max
 
-    link     = fc.call_action('WANCommonIFC1', 'GetCommonLinkProperties')
-    max_down = int(link.get('NewLayer1DownstreamMaxBitRate', 0)) // 8
-    max_up   = int(link.get('NewLayer1UpstreamMaxBitRate',  0)) // 8
+    addon = fc.call_action('WANCommonIFC1', 'GetAddonInfos')
+    rx64  = int(addon.get('NewX_AVM_DE_TotalBytesReceived64') or 0)
+    tx64  = int(addon.get('NewX_AVM_DE_TotalBytesSent64')     or 0)
+    now   = time.time()
+
+    # Calcul du débit par delta — plus précis que le taux interne FritzBox
+    if _prev_t > 0 and rx64 >= _prev_rx and tx64 >= _prev_tx:
+        dt   = now - _prev_t
+        down = int((rx64 - _prev_rx) / dt) if dt > 0 else 0
+        up   = int((tx64 - _prev_tx) / dt) if dt > 0 else 0
+    else:
+        # Premier appel ou compteur réinitialisé → taux FritzBox en fallback
+        down = int(addon.get('NewByteReceiveRate') or 0)
+        up   = int(addon.get('NewByteSendRate')    or 0)
+
+    _prev_rx, _prev_tx, _prev_t = rx64, tx64, now
+
+    # Capacité DSL — relire seulement si cache expiré
+    if now - _dsl_max['fetched_at'] > DSL_CACHE_TTL:
+        link = fc.call_action('WANCommonIFC1', 'GetCommonLinkProperties')
+        _dsl_max['down']       = int(link.get('NewLayer1DownstreamMaxBitRate') or 0) // 8
+        _dsl_max['up']         = int(link.get('NewLayer1UpstreamMaxBitRate')   or 0) // 8
+        _dsl_max['fetched_at'] = now
+        connected = link.get('NewPhysicalLinkStatus') == 'Up'
+    else:
+        connected = True  # on reçoit des données → connecté
 
     return {
         'down':      down,
         'up':        up,
-        'max_down':  max_down,
-        'max_up':    max_up,
-        'connected': link.get('NewPhysicalLinkStatus') == 'Up',
+        'max_down':  _dsl_max['down'],
+        'max_up':    _dsl_max['up'],
+        'connected': connected,
     }
 
 
@@ -83,8 +114,6 @@ def get_devices(fc):
     r.raise_for_status()
 
     root = ET.fromstring(r.text)
-    now = int(time.time())
-
     signal_map = get_wlan_signal_map(fc)
 
     devices = []

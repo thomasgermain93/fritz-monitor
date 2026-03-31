@@ -425,6 +425,8 @@
     let currentFilter = 'all';
     let allDevices = [];
     let wanHistory = [];
+    let wanMaxDown = 0;
+    let wanMaxUp   = 0;
 
     function setFilter(f, btn) {
       currentFilter = f;
@@ -515,15 +517,28 @@
 
       if (wanHistory.length < 2) return;
 
+      // Auto-scale sur le max des données réelles de la fenêtre
+      // (le % de capacité DSL est déjà affiché dans le texte "X% du max")
       const maxVal = Math.max(1, ...wanHistory.map(p => Math.max(p.down, p.up)));
-      const pad = 1;
+
+      const pad = 2;
       const w = W - pad * 2;
       const h = H - pad * 2;
+
+      // Ligne de référence 50%
+      ctx.beginPath();
+      ctx.moveTo(pad, pad + h * 0.5);
+      ctx.lineTo(pad + w, pad + h * 0.5);
+      ctx.strokeStyle = 'rgba(0,0,0,0.06)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
 
       function drawLine(vals, stroke, fillAlpha) {
         const pts = vals.map((v, i) => ({
           x: pad + (i / (vals.length - 1)) * w,
-          y: pad + h - (v / maxVal) * h,
+          y: pad + h - Math.min(1, v / maxVal) * h,
         }));
 
         // Fill
@@ -544,8 +559,8 @@
         ctx.stroke();
       }
 
-      drawLine(wanHistory.map(p => p.down), '#111', 0.08);
-      drawLine(wanHistory.map(p => p.up),   '#888', 0.04);
+      drawLine(wanHistory.map(p => p.down), '#111', 0.07);
+      drawLine(wanHistory.map(p => p.up),   '#777', 0.04);
     }
 
     function splitFmt(fmt) {
@@ -583,8 +598,10 @@
           document.getElementById('wan-up-pct').textContent   = pctU > 0 ? pctU.toFixed(0) + '% du max' : '';
         }
 
-        allDevices = data.devices  || [];
+        allDevices = data.devices     || [];
         wanHistory = data.wan_history || [];
+        if (data.wan?.max_down) wanMaxDown = data.wan.max_down;
+        if (data.wan?.max_up)   wanMaxUp   = data.wan.max_up;
         if (!document.querySelector('.rename-input')) renderDevices();
         drawSparkline();
 
