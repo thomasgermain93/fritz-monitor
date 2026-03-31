@@ -4,14 +4,29 @@ Dashboard web local pour surveiller les appareils connectés à une FritzBox et 
 
 ![Python](https://img.shields.io/badge/Python-3.8+-blue) ![Flask](https://img.shields.io/badge/Flask-3.x-green)
 
+## Screenshots
+
+**Débit WAN en temps réel avec % d'utilisation DSL**
+
+![WAN](docs/screenshot-wan.png)
+
+**Historique sparkline 3 min**
+
+![Sparkline](docs/screenshot-sparkline.png)
+
+**Liste des appareils avec signal WiFi et vitesse LAN**
+
+![Appareils](docs/screenshot-devices.png)
+
 ## Fonctionnalités
 
-- **Débit WAN en temps réel** — download/upload DSL avec barre de remplissage et historique sparkline (3 min)
+- **Débit WAN en temps réel** — download/upload réels (bytes/s via TR-064) avec barre de remplissage, % d'utilisation DSL et historique sparkline (3 min)
 - **Liste des appareils** — tous les appareils du réseau (WiFi + LAN), actifs ou hors ligne
 - **Signal WiFi** — indicateur 4 barres + débit négocié (Mbps)
+- **Vitesse LAN** — débit négocié en Mbps pour les appareils filaires
 - **Filtres** — Tous / Connectés / WiFi / LAN / Priorité
 - **Renommer** — clic sur un nom d'appareil pour le renommer (sauvegardé dans la FritzBox)
-- **Priorité** — bouton ★ pour activer/désactiver la priorité réseau d'un appareil (sauvegardé dans la FritzBox)
+- **Priorité** — bouton ★ pour activer/désactiver la priorité réseau (sauvegardé dans la FritzBox)
 - Rafraîchissement automatique toutes les 3 secondes
 
 ## Prérequis
@@ -56,8 +71,9 @@ Pour y accéder depuis un autre appareil du réseau : **http://[IP_DE_VOTRE_MAC]
 
 ## Stack technique
 
-- **Backend** : Python / Flask — polling FritzBox toutes les 3s via TR-064 (fritzconnection) et `data.lua`
-- **Auth FritzBox** : challenge MD5 via `login_sid.lua`
-- **Débit WAN** : `data.lua?page=overview` → `internet.connections[0]` (valeurs DSL en Kbps)
+- **Backend** : Python / Flask — polling FritzBox toutes les 3s via TR-064 (fritzconnection)
+- **Débit WAN réel** : `WANCommonIFC1/GetAddonInfos` → `NewByteReceiveRate` / `NewByteSendRate`
+- **Capacité DSL** : `WANCommonIFC1/GetCommonLinkProperties` → `NewLayer1DownstreamMaxBitRate`
 - **Signal WiFi** : `WLANConfiguration1/2/3` → `X_AVM-DE_GetWLANDeviceListPath`
+- **Vitesse LAN/WiFi** : `X_AVM-DE_Speed` dans le hostlist TR-064
 - **Frontend** : HTML/CSS/JS vanilla, JetBrains Mono, Canvas sparkline

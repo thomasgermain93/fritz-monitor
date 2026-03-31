@@ -121,6 +121,21 @@
       letter-spacing: 0.04em;
     }
 
+    .wan-unit {
+      font-size: 1rem;
+      font-weight: 400;
+      color: var(--muted);
+      margin-left: 3px;
+      letter-spacing: 0;
+    }
+
+    .wan-pct {
+      font-size: 0.72rem;
+      color: var(--muted);
+      letter-spacing: 0.03em;
+      margin-top: 2px;
+    }
+
     /* ── Sparkline ── */
     .wan-chart {
       background: var(--bg);
@@ -360,7 +375,8 @@
       <div class="wan-stat-top">
         <div>
           <div class="wan-label">↓ Download DSL</div>
-          <div class="wan-value" id="wan-down">—</div>
+          <div class="wan-value"><span id="wan-down-num">—</span><span class="wan-unit" id="wan-down-unit"></span></div>
+          <div class="wan-pct" id="wan-down-pct"></div>
         </div>
       </div>
       <div class="wan-fill-bg"><div class="wan-fill-bar" id="wan-down-bar" style="width:0%"></div></div>
@@ -370,7 +386,8 @@
       <div class="wan-stat-top">
         <div>
           <div class="wan-label">↑ Upload DSL</div>
-          <div class="wan-value" id="wan-up">—</div>
+          <div class="wan-value"><span id="wan-up-num">—</span><span class="wan-unit" id="wan-up-unit"></span></div>
+          <div class="wan-pct" id="wan-up-pct"></div>
         </div>
       </div>
       <div class="wan-fill-bg"><div class="wan-fill-bar" id="wan-up-bar" style="width:0%"></div></div>
@@ -448,12 +465,14 @@
 
       container.innerHTML = list.map(d => {
         const ifaceBadge = getInterface(d.interface, d.active);
-        const prioBadge  = d.priority ? ' <span class="badge badge-prio">★ prio</span>' : '';
 
         let signalCol = '';
         if (d.active && d.interface === 'WiFi') {
           signalCol = `<div class="signal-wrap">${signalBars(d.signal)}<span class="signal-val">${d.signal}%</span></div>
           ${d.wifi_mbps ? `<div class="wifi-speed">${d.wifi_mbps} Mbps</div>` : ''}`;
+        } else if (d.active && d.interface === 'LAN') {
+          signalCol = `<span class="status-online">● en ligne</span>
+          ${d.lan_mbps ? `<div class="wifi-speed">${d.lan_mbps} Mbps</div>` : ''}`;
         } else if (d.active) {
           signalCol = `<span class="status-online">● en ligne</span>`;
         } else {
@@ -466,14 +485,14 @@
         const prioBtn  = d.ip
           ? `<button class="prio-btn${d.priority ? ' on' : ''}"
                onclick="togglePriority(this, '${safeIp}', ${d.priority})"
-               title="${d.priority ? 'Retirer la priorité' : 'Activer la priorité'}">★</button>`
+               title="${d.priority ? 'Retirer la priorité' : 'Activer la priorité'}">${d.priority ? '★ prio' : '★'}</button>`
           : '';
         return `<div class="device-row ${d.active ? '' : 'inactive'} ${d.priority ? 'priority' : ''}">
           <div>
             <div class="device-name">
               <span class="device-name-text"
                     onclick="startRename(this, '${safeMac}', '${safeName}')"
-                    title="Cliquer pour renommer">${safeName}</span>${prioBadge}
+                    title="Cliquer pour renommer">${safeName}</span>
             </div>
             <div class="device-ip">${d.ip || d.mac} ${prioBtn}</div>
           </div>
@@ -529,6 +548,11 @@
       drawLine(wanHistory.map(p => p.up),   '#888', 0.04);
     }
 
+    function splitFmt(fmt) {
+      const m = (fmt || '').match(/^([\d.]+)\s*(.*)$/);
+      return m ? { num: m[1], unit: m[2] || '' } : { num: fmt || '—', unit: '' };
+    }
+
     async function refresh() {
       try {
         const res  = await fetch('/api/devices');
@@ -543,19 +567,25 @@
         }
 
         if (data.wan?.down_fmt) {
-          document.getElementById('wan-down').textContent     = data.wan.down_fmt;
-          document.getElementById('wan-up').textContent       = data.wan.up_fmt;
-          document.getElementById('wan-max-down').textContent = data.wan.max_down_fmt || '—';
-          document.getElementById('wan-max-up').textContent   = data.wan.max_up_fmt   || '—';
+          const sd = splitFmt(data.wan.down_fmt);
+          const su = splitFmt(data.wan.up_fmt);
+          document.getElementById('wan-down-num').textContent  = sd.num;
+          document.getElementById('wan-down-unit').textContent = sd.unit;
+          document.getElementById('wan-up-num').textContent    = su.num;
+          document.getElementById('wan-up-unit').textContent   = su.unit;
+          document.getElementById('wan-max-down').textContent  = data.wan.max_down_fmt || '—';
+          document.getElementById('wan-max-up').textContent    = data.wan.max_up_fmt   || '—';
           const pctD = data.wan.max_down > 0 ? Math.min(100, data.wan.down / data.wan.max_down * 100) : 0;
           const pctU = data.wan.max_up   > 0 ? Math.min(100, data.wan.up   / data.wan.max_up   * 100) : 0;
           document.getElementById('wan-down-bar').style.width = pctD.toFixed(1) + '%';
           document.getElementById('wan-up-bar').style.width   = pctU.toFixed(1) + '%';
+          document.getElementById('wan-down-pct').textContent = pctD > 0 ? pctD.toFixed(0) + '% du max' : '';
+          document.getElementById('wan-up-pct').textContent   = pctU > 0 ? pctU.toFixed(0) + '% du max' : '';
         }
 
         allDevices = data.devices  || [];
         wanHistory = data.wan_history || [];
-        renderDevices();
+        if (!document.querySelector('.rename-input')) renderDevices();
         drawSparkline();
 
         document.getElementById('last-update').textContent =
@@ -579,6 +609,7 @@
         const json = await res.json();
         if (json.ok) {
           btn.classList.toggle('on', newPrio);
+          btn.textContent = newPrio ? '★ prio' : '★';
           btn.title = newPrio ? 'Retirer la priorité' : 'Activer la priorité';
           btn.onclick = () => togglePriority(btn, ip, newPrio);
           // Mettre à jour la bordure de la ligne

@@ -1,9 +1,7 @@
-import hashlib
 import threading
 import time
 from xml.etree import ElementTree as ET
 
-import requests
 from flask import Flask, jsonify, render_template, request
 from fritzconnection.core.fritzconnection import FritzConnection
 
@@ -14,67 +12,29 @@ FRITZ_USER = 'fritz1412'
 FRITZ_PASSWORD = 'paper5192'
 REFRESH_INTERVAL = 3
 
-_web_sid = None
-_web_sid_lock = threading.Lock()
-
 _cache = {'devices': [], 'wan': {}, 'wan_history': [], 'error': None}
 _lock = threading.Lock()
 
 
-def get_web_sid():
-    """Authentification MD5 sur l'interface web FritzBox."""
-    global _web_sid
-    r = requests.get(f'http://{FRITZ_IP}/login_sid.lua', timeout=5)
-    root = ET.fromstring(r.text)
-    sid = root.findtext('SID')
-    challenge = root.findtext('Challenge')
-    if sid == '0000000000000000':
-        resp = hashlib.md5(f'{challenge}-{FRITZ_PASSWORD}'.encode('utf-16-le')).hexdigest()
-        r2 = requests.get(f'http://{FRITZ_IP}/login_sid.lua',
-                          params={'username': FRITZ_USER, 'response': f'{challenge}-{resp}'},
-                          timeout=5)
-        sid = ET.fromstring(r2.text).findtext('SID')
-    with _web_sid_lock:
-        _web_sid = sid
-    return sid
-
-
-def get_wan_stats():
+def get_wan_stats(fc):
     """
-    Lit les débits DSL actuels via data.lua (valeurs en Kbps).
-    downstream / upstream = débit actuel
-    medium_downstream / medium_upstream = capacité ligne DSL
-    Retourne les valeurs en bytes/s.
+    Débits réels actuels via TR-064 GetAddonInfos (bytes/s).
+    Capacité DSL max via GetCommonLinkProperties (bits/s → bytes/s).
     """
-    with _web_sid_lock:
-        sid = _web_sid
-    if not sid:
-        sid = get_web_sid()
+    addon = fc.call_action('WANCommonIFC1', 'GetAddonInfos')
+    down = int(addon.get('NewByteReceiveRate', 0))
+    up   = int(addon.get('NewByteSendRate', 0))
 
-    r = requests.post(f'http://{FRITZ_IP}/data.lua',
-                      data={'sid': sid, 'page': 'overview', 'xhr': '1', 'xhrId': 'all'},
-                      timeout=6)
-
-    if r.status_code == 403:
-        sid = get_web_sid()
-        r = requests.post(f'http://{FRITZ_IP}/data.lua',
-                          data={'sid': sid, 'page': 'overview', 'xhr': '1', 'xhrId': 'all'},
-                          timeout=6)
-
-    conns = r.json().get('data', {}).get('internet', {}).get('connections', [])
-    # Prend la connexion principale (DSL)
-    main = next((c for c in conns if c.get('role') == 'main'), None) or (conns[0] if conns else {})
-
-    def kbps_to_bps(kbps):
-        return int(kbps) * 1000 // 8
+    link     = fc.call_action('WANCommonIFC1', 'GetCommonLinkProperties')
+    max_down = int(link.get('NewLayer1DownstreamMaxBitRate', 0)) // 8
+    max_up   = int(link.get('NewLayer1UpstreamMaxBitRate',  0)) // 8
 
     return {
-        'down':        kbps_to_bps(main.get('downstream', 0)),
-        'up':          kbps_to_bps(main.get('upstream', 0)),
-        'max_down':    kbps_to_bps(main.get('medium_downstream', 0)),
-        'max_up':      kbps_to_bps(main.get('medium_upstream', 0)),
-        'provider':    main.get('provider', ''),
-        'connected':   main.get('connected', False),
+        'down':      down,
+        'up':        up,
+        'max_down':  max_down,
+        'max_up':    max_up,
+        'connected': link.get('NewPhysicalLinkStatus') == 'Up',
     }
 
 
@@ -144,11 +104,10 @@ def get_devices(fc):
         # Signal WiFi (0 si LAN)
         signal = signal_map.get(mac, 0) if iface_label == 'WiFi' else 0
 
-        # WiFi link speed (Mbps) - pour info connexion, pas débit réel
-        wifi_mbps = 0
-        if iface_label == 'WiFi':
-            raw_speed = int(item.findtext('X_AVM-DE_Speed', '0') or 0)
-            wifi_mbps = raw_speed  # déjà en Mbps pour WiFi
+        # Débit négocié (Mbps) — WiFi et LAN
+        raw_speed = int(item.findtext('X_AVM-DE_Speed', '0') or 0)
+        wifi_mbps = raw_speed if iface_label == 'WiFi' else 0
+        lan_mbps  = raw_speed if iface_label == 'LAN'  else 0
 
         devices.append({
             'name': (item.findtext('HostName') or item.findtext('Name') or 'Inconnu').strip(),
@@ -159,6 +118,7 @@ def get_devices(fc):
             'priority': priority > 0,
             'signal': signal,           # 0-100 pour WiFi
             'wifi_mbps': wifi_mbps,     # débit négocié WiFi en Mbps
+            'lan_mbps':  lan_mbps,      # débit négocié LAN en Mbps
         })
 
     devices.sort(key=lambda d: (not d['active'], not d['priority'], -d['signal']))
@@ -166,15 +126,20 @@ def get_devices(fc):
 
 
 def poll_fritz():
-    get_web_sid()  # auth initiale
+    fc = None
     while True:
         try:
-            fc = FritzConnection(address=FRITZ_IP, password=FRITZ_PASSWORD, timeout=5)
+            if fc is None:
+                print('[poll] Connexion FritzBox…')
+                fc = FritzConnection(address=FRITZ_IP, user=FRITZ_USER,
+                                     password=FRITZ_PASSWORD, timeout=10)
+                print('[poll] Connecté.')
+
             devices = get_devices(fc)
 
             wan = {}
             try:
-                raw = get_wan_stats()
+                raw = get_wan_stats(fc)
                 wan = {
                     'down':     raw['down'],
                     'up':       raw['up'],
@@ -184,7 +149,6 @@ def poll_fritz():
                     'up_fmt':   fmt_speed(raw['up']),
                     'max_down_fmt': fmt_speed(raw['max_down']),
                     'max_up_fmt':   fmt_speed(raw['max_up']),
-                    'provider': raw['provider'],
                     'connected': raw['connected'],
                 }
             except Exception as e:
@@ -206,6 +170,7 @@ def poll_fritz():
 
         except Exception as e:
             print(f'[poll] {e}')
+            fc = None  # force reconnexion au prochain cycle
             with _lock:
                 _cache['error'] = str(e)
 
